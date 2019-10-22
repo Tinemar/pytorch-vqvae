@@ -8,14 +8,19 @@ from modules import VectorQuantizedVAE, to_scalar
 from datasets import MiniImagenet
 
 from tensorboardX import SummaryWriter
+import vgg
+def train(data_loader, model,target_model, optimizer, args, writer):
+    criterion_t = torch.nn.CrossEntropyLoss().to(args.device)
 
-def train(data_loader, model, optimizer, args, writer):
     for images, _ in data_loader:
         images = images.to(args.device)
-
         optimizer.zero_grad()
         x_tilde, z_e_x, z_q_x = model(images)
-
+        with torch.no_grad():
+            target_out = target_model(x_tilde)
+        target_label = torch.zeros(len(images)).to(args.device)
+        adv_loss = criterion_t(target_out,target_label.long())
+        print("adv loss:",adv_loss)
         # Reconstruction loss
         loss_recons = F.mse_loss(x_tilde, images)
         # Vector quantization objective
@@ -23,9 +28,9 @@ def train(data_loader, model, optimizer, args, writer):
         # Commitment objective
         loss_commit = F.mse_loss(z_e_x, z_q_x.detach())
 
-        loss = loss_recons + loss_vq + args.beta * loss_commit
+        loss = loss_recons + loss_vq + args.beta * loss_commit + adv_loss*0.5
         loss.backward()
-
+        print("train loss:",loss)
         # Logs
         writer.add_scalar('loss/train/reconstruction', loss_recons.item(), args.steps)
         writer.add_scalar('loss/train/quantization', loss_vq.item(), args.steps)
@@ -60,7 +65,6 @@ def generate_samples(images, model, args):
 def main(args):
     writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
     save_filename = './models/{0}'.format(args.output_folder)
-
     if args.dataset in ['mnist', 'fashion-mnist', 'cifar10']:
         transform = transforms.Compose([
             transforms.ToTensor(),
@@ -90,7 +94,7 @@ def main(args):
         valid_dataset = test_dataset
     elif args.dataset == 'miniimagenet':
         transform = transforms.Compose([
-            transforms.RandomResizedCrop(128),
+            transforms.RandomResizedCrop(32),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
@@ -119,8 +123,16 @@ def main(args):
     writer.add_image('original', fixed_grid, 0)
 
     model = VectorQuantizedVAE(num_channels, args.hidden_size, args.k).to(args.device)
+    if args.ckp != "":
+        model.load_state_dict(torch.load(args.ckp))
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-
+    if args.tmodel != '':
+        net = vgg.VGG('VGG19')
+        net = net.to(args.device)
+        net = torch.nn.DataParallel(net)
+        checkpoint = torch.load(args.tmodel)
+        net.load_state_dict(checkpoint['net'])
+        target_model = net
     # Generate the samples first once
     reconstruction = generate_samples(fixed_images, model, args)
     grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
@@ -128,9 +140,14 @@ def main(args):
 
     best_loss = -1.
     for epoch in range(args.num_epochs):
-        train(train_loader, model, optimizer, args, writer)
+        print(epoch)
+        # if epoch<100:
+        #     args.lr = 1e-5
+        # if epoch>100 and epoch< 400:
+        #     args.lr = 2e-5
+        train(train_loader, model, target_model,optimizer, args, writer)
         loss, _ = test(valid_loader, model, args, writer)
-
+        print("test loss:",loss)
         reconstruction = generate_samples(fixed_images, model, args)
         grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
         writer.add_image('reconstruction', grid, epoch + 1)
@@ -176,9 +193,10 @@ if __name__ == '__main__':
         help='name of the output folder (default: vqvae)')
     parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
         help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
-    parser.add_argument('--device', type=str, default='cpu',
+    parser.add_argument('--device', type=str, default='cuda',
         help='set the device (cpu or cuda, default: cpu)')
-
+    parser.add_argument('--tmodel', type=str, default='')
+    parser.add_argument('--ckp', type=str, default='')
     args = parser.parse_args()
 
     # Create logs and models folder if they don't exist

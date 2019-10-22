@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import json
-from torchvision import transforms
+from torchvision import transforms,datasets
 from torchvision.utils import save_image, make_grid
 
 from modules import VectorQuantizedVAE, GatedPixelCNN
@@ -25,7 +25,7 @@ def train(data_loader, model, prior, optimizer, args, writer):
         loss = F.cross_entropy(logits.view(-1, args.k),
                                latents.view(-1))
         loss.backward()
-
+        print(loss)
         # Logs
         writer.add_scalar('loss/train', loss.item(), args.steps)
 
@@ -86,7 +86,7 @@ def main(args):
         valid_dataset = test_dataset
     elif args.dataset == 'miniimagenet':
         transform = transforms.Compose([
-            transforms.RandomResizedCrop(128),
+            transforms.RandomResizedCrop(32),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
@@ -110,8 +110,8 @@ def main(args):
         batch_size=16, shuffle=True)
 
     # Save the label encoder
-    with open('./models/{0}/labels.json'.format(args.output_folder), 'w') as f:
-        json.dump(train_dataset._label_encoder, f)
+    # with open('./models/{0}/labels.json'.format(args.output_folder), 'w') as f:
+    #     json.dump(train_dataset._label_encoder, f)
 
     # Fixed images for Tensorboard
     fixed_images, _ = next(iter(test_loader))
@@ -125,11 +125,13 @@ def main(args):
     model.eval()
 
     prior = GatedPixelCNN(args.k, args.hidden_size_prior,
-        args.num_layers, n_classes=len(train_dataset._label_encoder)).to(args.device)
+        args.num_layers, n_classes=32).to(args.device)
+        # args.num_layers, n_classes=len(train_dataset._label_encoder)).to(args.device)
     optimizer = torch.optim.Adam(prior.parameters(), lr=args.lr)
 
     best_loss = -1.
     for epoch in range(args.num_epochs):
+        print(epoch)
         train(train_loader, model, prior, optimizer, args, writer)
         # The validation loss is not properly computed since
         # the classes in the train and valid splits of Mini-Imagenet
@@ -179,7 +181,7 @@ if __name__ == '__main__':
         help='name of the output folder (default: prior)')
     parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
         help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
-    parser.add_argument('--device', type=str, default='cpu',
+    parser.add_argument('--device', type=str, default='cuda',
         help='set the device (cpu or cuda, default: cpu)')
 
     args = parser.parse_args()

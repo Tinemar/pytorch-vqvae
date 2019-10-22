@@ -7,10 +7,13 @@ Project Report link: [final_project.pdf](final_project.pdf)
 1. To train the VQVAE with default arguments as discussed in the report, execute:
 ```
 python vqvae.py --data-folder /tmp/miniimagenet --output-folder models/vqvae
+python vqvae.py --data-folder cifar-10-batches-py --dataset cifar10 --output-folder models --device cuda
+python vqvae.py --ckp models/models/best.pt --lr 1e-5 --batch-size 256 --num-epochs 200 --output-folder models --device cuda --data-folder cifar-10-batches-py --dataset cifar10 --tmodel H:\pytorch-cifar\checkpoint\ckpt.pth
 ```
 2. To train the PixelCNN prior on the latents, execute:
 ```
 python pixelcnn_prior.py --data-folder /tmp/miniimagenet --model models/vqvae --output-folder models/pixelcnn_prior
+python pixelcnn_prior.py --data-folder cifar-10-batches-py --dataset cifar10 --model models/best.pt --output-folder models/pixelcnn_prior
 ```
 ### Datasets Tested
 #### Image
